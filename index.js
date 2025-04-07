@@ -1,21 +1,51 @@
-const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
-const qrcode = require("qrcode-terminal");
+const { Client, LocalAuth } = require("whatsapp-web.js");
+const qrcode = require("qrcode");
+const cloudinary = require("cloudinary").v2;
 const fs = require("fs");
 
+// Configura Cloudinary con variables de entorno (más seguro)
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
 const client = new Client({
-  authStrategy: new LocalAuth(),
-  puppeteer: {
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  }
+    authStrategy: new LocalAuth(),
+    puppeteer: {
+        headless: true,
+        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+    },
 });
 
 // Objeto para rastrear el estado de la conversación por usuario
 const estadosConversacion = {};
 
-client.on("qr", (qr) => {
-    qrcode.generate(qr, { small: true });
-    console.log("Escanea este código QR con tu WhatsApp");
+// Manejo del QR
+client.on("qr", async (qr) => {
+    try {
+        // Generar el QR como imagen y guardarlo temporalmente
+        const qrImagePath = "./qr-code.png";
+        await qrcode.toFile(qrImagePath, qr, {
+            color: {
+                dark: "#000000", // Color del QR
+                light: "#FFFFFF", // Fondo
+            },
+        });
+        console.log("QR generado como imagen en:", qrImagePath);
+
+        // Subir la imagen a Cloudinary
+        const result = await cloudinary.uploader.upload(qrImagePath, {
+            folder: "whatsapp-qr", // Opcional: organiza las imágenes en una carpeta
+            overwrite: true, // Sobrescribe si ya existe una imagen con el mismo nombre
+        });
+        console.log("Escanea el QR desde este enlace:", result.secure_url);
+
+        // Eliminar el archivo local después de subirlo (limpieza)
+        fs.unlinkSync(qrImagePath);
+    } catch (error) {
+        console.error("Error al generar o subir el QR:", error);
+    }
 });
 
 client.on("ready", () => {
@@ -33,11 +63,11 @@ const TIMEOUT_MS = TIMEOUT_MINUTES * 60 * 1000;
 // Función para configurar o reiniciar el temporizador de un usuario
 function setTimeoutForUser(remitente) {
     const estado = estadosConversacion[remitente];
-    
+
     if (estado && estado.timeoutId) {
         clearTimeout(estado.timeoutId);
     }
-    
+
     if (estado && estado.nivel !== "con_asesor") {
         estado.timeoutId = setTimeout(async () => {
             await client.sendMessage(remitente, "Han pasado 5 minutos sin respuesta. La conversación ha expirado. Escribe 'hola' para empezar de nuevo.");
