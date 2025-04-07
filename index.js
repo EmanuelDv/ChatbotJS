@@ -22,8 +22,32 @@ client.on("disconnected", (reason) => {
     console.log("Desconectado de WhatsApp:", reason);
 });
 
+// Definimos el tiempo de espera: 5 minutos en milisegundos
+const TIMEOUT_MINUTES = 5;
+const TIMEOUT_MS = TIMEOUT_MINUTES * 60 * 1000;
+
+// Función para configurar o reiniciar el temporizador de un usuario
+function setTimeoutForUser(remitente) {
+    const estado = estadosConversacion[remitente];
+    
+    if (estado && estado.timeoutId) {
+        clearTimeout(estado.timeoutId);
+    }
+    
+    if (estado && estado.nivel !== "con_asesor") {
+        estado.timeoutId = setTimeout(async () => {
+            await client.sendMessage(remitente, "Han pasado 5 minutos sin respuesta. La conversación ha expirado. Escribe 'hola' para empezar de nuevo.");
+            delete estadosConversacion[remitente];
+        }, TIMEOUT_MS);
+    }
+}
+
 // Funciones de texto para menús
 const menus = {
+    terminos: `¡Hola! 👋 ¡Bienvenid@! Gracias por ponerte en contacto con nosotros. Antes de iniciar, es necesario que aceptes los términos y condiciones de EstoEsPamii. Si quieres conocer más, ingresa aquí: https://estoespamii.co/www/tycclientes2024.html
+    \nPara continuar elige:
+    \n1. Acepto
+    \n2. No acepto`,
     principal: `¡Hola! 👋 ¡Bienvenid@ a EstoEsPamii! Soy tu asistente virtual, list@ para darte una mano. 😉  
     \nElige una opción:
     \n1. Chatear con un asesor
@@ -50,7 +74,22 @@ const menus = {
 // Definición de los handlers para cada stage
 const stageHandlers = {
     inicio: async (message, estado) => {
-        await message.reply("Por favor, escribe 'hola' para acceder al menú.");
+        await message.reply(menus.terminos);
+        estadosConversacion[message.from] = { nivel: "terminos", timeoutId: null }; // Actualizamos directamente
+    },
+    terminos: async (message, estado) => {
+        const opcion = message.body.trim();
+        const opciones = {
+            "1": { nivel: "principal", respuesta: menus.principal },
+            "2": { nivel: null, respuesta: "Acepta los términos y condiciones para continuar" },
+        };
+        const seleccion = opciones[opcion] || { respuesta: "Opción no válida. Selecciona 1 para aceptar o 2 para rechazar." };
+        await message.reply(seleccion.respuesta);
+        if (seleccion.nivel === null) {
+            delete estadosConversacion[message.from];
+        } else if (seleccion.nivel) {
+            estadosConversacion[message.from] = { nivel: seleccion.nivel, timeoutId: null }; // Actualizamos el estado completo
+        }
     },
     principal: async (message, estado) => {
         const opcion = message.body.trim();
@@ -63,8 +102,11 @@ const stageHandlers = {
         };
         const seleccion = opciones[opcion] || { respuesta: "Opción no válida. Seleccione un número del 1 al 5." };
         await message.reply(seleccion.respuesta);
-        if (seleccion.nivel === null) delete estadosConversacion[message.from];
-        else if (seleccion.nivel) estado.nivel = seleccion.nivel;
+        if (seleccion.nivel === null) {
+            delete estadosConversacion[message.from];
+        } else if (seleccion.nivel) {
+            estado.nivel = seleccion.nivel;
+        }
     },
     asesor: async (message, estado) => {
         const opcion = message.body.trim();
@@ -151,21 +193,25 @@ client.on("message", async (message) => {
     const remitente = message.from;
     const texto = message.body.trim().toLowerCase();
 
-    // Si el usuario escribe "hola", iniciar conversación
+    // Si el usuario escribe "hola", mostrar el menú de términos
     if (texto === "hola") {
-        await message.reply(menus.principal);
-        estadosConversacion[remitente] = { nivel: "principal" };
+        await message.reply(menus.terminos);
+        estadosConversacion[remitente] = { nivel: "terminos", timeoutId: null };
+        setTimeoutForUser(remitente);
         return;
     }
 
     // Si escribe "salir", reiniciar estado
     if (texto === "salir" && estadosConversacion[remitente]) {
         await message.reply("Has salido del modo actual. Escribe 'hola' para ver el menú.");
+        if (estadosConversacion[remitente].timeoutId) {
+            clearTimeout(estadosConversacion[remitente].timeoutId);
+        }
         delete estadosConversacion[remitente];
         return;
     }
 
-    // Si no hay estado, pedir "hola"
+    // Si no hay estado, mostrar el menú de términos
     if (!estadosConversacion[remitente]) {
         await stageHandlers.inicio(message, {});
         return;
@@ -175,6 +221,9 @@ client.on("message", async (message) => {
     const estado = estadosConversacion[remitente];
     const handler = stageHandlers[estado.nivel] || stageHandlers.inicio;
     await handler(message, estado);
+
+    // Reiniciar el temporizador después de procesar el mensaje
+    setTimeoutForUser(remitente);
 });
 
 client.initialize();
