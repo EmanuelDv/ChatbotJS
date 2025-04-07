@@ -2,8 +2,14 @@ const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
 const qrcode = require("qrcode-terminal");
 const fs = require("fs");
 
+const { Client, LocalAuth } = require('whatsapp-web.js');
+
 const client = new Client({
-    authStrategy: new LocalAuth(),
+  authStrategy: new LocalAuth(),
+  puppeteer: {
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  }
 });
 
 // Objeto para rastrear el estado de la conversación por usuario
